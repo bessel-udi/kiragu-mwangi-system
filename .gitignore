@@ -1,0 +1,39 @@
+# .gitignore - keeps secrets, dependencies, uploads and build output out of git.
+# Rules come from BUILD_GUIDE.md Section 1.5: never commit generated files,
+# node_modules, .env files, uploads or build output.
+
+# ---- Dependencies ----
+node_modules/
+
+# ---- Environment files: real ones are never committed, examples always are ----
+.env
+.env.*
+!.env.example
+
+# ---- Uploaded files (property images stored by the API) ----
+api/uploads/
+uploads/
+
+# ---- Build output ----
+dist/
+build/
+.vite/
+coverage/
+
+# ---- Logs ----
+logs/
+*.log
+npm-debug.log*
+
+# ---- Test and tooling caches ----
+.eslintcache
+.cache/
+.tmp/
+tmp/
+
+# ---- Editor and operating system files ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

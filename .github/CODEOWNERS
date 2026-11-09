@@ -1,0 +1,58 @@
+# .github/CODEOWNERS - encodes the ownership table in BUILD_GUIDE.md Section 2.
+# GitHub uses it to request a review from the owner of every file a pull request touches.
+# Later rules override earlier ones, so general rules come first and specific ones after.
+#
+# Owners:
+#   Bessel  = @bessel-udi
+#   John    = @JMG-coder
+#   Kennedy = @nyongesakennedy06-afk
+#   Jayden  = @jaydenthe-droid
+#   Kwame   = not yet added (see the commented rules below)
+
+# Default owner: anything not listed below belongs to Bessel
+* @bessel-udi
+
+# ---- Bessel: database, API core, root tooling, repo configuration ----
+/db/ @bessel-udi
+/api/ @bessel-udi
+/api/openapi.yaml @bessel-udi
+/package.json @bessel-udi
+/package-lock.json @bessel-udi
+/.gitignore @bessel-udi
+/.editorconfig @bessel-udi
+/.prettierrc @bessel-udi
+/eslint.config.js @bessel-udi
+/README.md @bessel-udi
+/.github/ @bessel-udi
+
+# ---- John: bookings, valuations, notifications, audit logs, reports, integrations, CI ----
+/api/src/modules/bookings/ @JMG-coder
+/api/src/modules/valuations/ @JMG-coder
+/api/src/modules/notifications/ @JMG-coder
+/api/src/modules/audit-logs/ @JMG-coder
+/api/src/modules/reports/ @JMG-coder
+/api/src/services/whatsapp/ @JMG-coder
+/api/src/services/notifications/ @JMG-coder
+/.github/workflows/ @JMG-coder
+
+# ---- Kennedy: public site and the common part of the UI kit ----
+/web/ @nyongesakennedy06-afk
+/ui-kit/ @nyongesakennedy06-afk
+
+# ---- Kwame: admin panel and the admin part of the UI kit ----
+# Kwame's GitHub username was not available when this file was written.
+# Until he is added, /admin/ and /ui-kit/src/admin/ fall back to the owners above.
+# To activate: replace @KWAME-USERNAME with his username and remove the leading "# ".
+# /admin/ @KWAME-USERNAME
+# /ui-kit/src/admin/ @KWAME-USERNAME
+
+# ---- Jayden: documentation and every tests folder and test-runner config ----
+/docs/ @jaydenthe-droid
+/api/tests/ @jaydenthe-droid
+/web/tests/ @jaydenthe-droid
+/admin/tests/ @jaydenthe-droid
+/ui-kit/tests/ @jaydenthe-droid
+/api/jest.config.* @jaydenthe-droid
+/web/vitest.config.* @jaydenthe-droid
+/admin/vitest.config.* @jaydenthe-droid
+/ui-kit/vitest.config.* @jaydenthe-droid

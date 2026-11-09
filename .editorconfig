@@ -1,0 +1,22 @@
+# .editorconfig - makes every editor use the same basic formatting rules,
+# so the five team members' files look identical (indentation, line endings).
+# Prettier (.prettierrc) handles the finer details; this covers the basics.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Markdown uses trailing spaces for line breaks, so do not trim them
+[*.md]
+trim_trailing_whitespace = false
+
+# SQL migrations: same indentation, kept explicit for clarity
+[*.sql]
+indent_style = space
+indent_size = 2

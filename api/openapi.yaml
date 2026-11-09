@@ -1,0 +1,1938 @@
+openapi: 3.0.3
+info:
+  title: Kiragu & Mwangi Real Estate Management System API
+  version: 1.0.0
+  description: |
+    Single source of truth for the `/api` backend. Frontends (`/web`, `/admin`) build against a mock
+    generated from this file while `/api` is implemented. Any change to this file goes through a PR
+    that is approved by both a frontend and a backend member.
+
+    ## Access levels
+    | Code | Meaning |
+    |------|---------|
+    | P | Public, no login |
+    | U | Any logged-in user (client, admin or superadmin) |
+    | A | Admin or superadmin |
+    | S | Superadmin only |
+
+    ## Conventions
+    - JSON bodies use `camelCase`. Dates are `YYYY-MM-DD`, times are `HH:mm` (24h, Africa/Nairobi),
+      timestamps are ISO 8601 UTC.
+    - Authentication is an HttpOnly cookie named `session`. Browser clients must send
+      `credentials: "include"`; the API must allow the web and admin origins in CORS with credentials.
+      State-changing requests rely on `SameSite=Lax` (or `None; Secure` when hosted on different sites).
+    - Every error uses the `Error` shape. Validation errors list fields in `error.details`.
+    - Every list endpoint returns `{ items, page, limit, total }`. Defaults: `page=1`, `limit=20`, max `limit=100`.
+    - Audit logging is done by the server, never by clients. Logged: login, logout, and every create,
+      update, delete and status change.
+
+    ## Status workflows
+    - Booking: `pending` -> `confirmed` | `rescheduled` | `cancelled` | `completed`;
+      `confirmed` -> `rescheduled` | `cancelled` | `completed`;
+      `rescheduled` -> `confirmed` | `cancelled` | `completed`.
+      `completed` and `cancelled` are final. Illegal moves return 422.
+    - Valuation: `submitted` -> `under_review` -> `completed`. No skipping, no going back. Illegal moves return 422.
+
+    ## Booking slots
+    One-hour slots from 09:00 to 16:00 (last slot starts 16:00), Monday to Saturday. A slot is unavailable when the
+    property already has a non-cancelled booking at that date and time. Dates in the past are invalid.
+    A client may not hold two active bookings for the same property.
+
+    ## Schema decisions in this contract (need DB changes)
+    1. New `notifications` table (see `Notification`).
+    2. New `admin_notes` column on `valuation_requests`.
+    3. `users.role` values are `client`, `admin`, `superadmin` (max 10 characters).
+servers:
+  - url: http://localhost:4000
+    description: Local development
+  - url: https://REPLACE-WITH-DEPLOYED-HOST
+    description: Deployed API
+tags:
+  - name: Auth
+  - name: Users
+  - name: Properties
+  - name: Dashboard
+  - name: Bookings
+  - name: Valuations
+  - name: Notifications
+  - name: Audit logs
+  - name: Reports
+  - name: Health
+
+paths:
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a client account (P)
+      description: Always creates a user with role `client`. Hashes the password and sets the session cookie.
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Account created and logged in.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in (P)
+      description: Rate limited. Deactivated accounts are rejected with 403.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Logged in.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Log out (any)
+      description: Clears the session cookie. Succeeds even when not logged in.
+      operationId: logout
+      security: []
+      responses:
+        '204':
+          description: Logged out.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetCookie'
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user (U)
+      operationId: getMe
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: The logged-in user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password reset link (P)
+      description: Always returns the same 200 message whether or not the email exists. Sends the reset link by email.
+      operationId: forgotPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          $ref: '#/components/responses/MessageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password with a token (P)
+      description: The token is valid for 1 hour and single use.
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token:
+                  type: string
+                password:
+                  $ref: '#/components/schemas/Password'
+      responses:
+        '200':
+          $ref: '#/components/responses/MessageOk'
+        '400':
+          description: Token invalid or expired, or password fails validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/users:
+    get:
+      tags: [Users]
+      summary: List users (A)
+      operationId: listUsers
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: q
+          in: query
+          description: Matches name, email or phone number.
+          schema:
+            type: string
+        - name: role
+          in: query
+          schema:
+            $ref: '#/components/schemas/Role'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of users.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Users]
+      summary: Create a user (A)
+      description: |
+        Admins may only create `client` users. Only a superadmin may set `admin` or `superadmin`;
+        anyone else sending those roles gets 403.
+      operationId: createUser
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fullName, email, phoneNumber, password, role]
+              properties:
+                fullName:
+                  type: string
+                  maxLength: 100
+                email:
+                  type: string
+                  format: email
+                  maxLength: 150
+                phoneNumber:
+                  type: string
+                  maxLength: 20
+                password:
+                  $ref: '#/components/schemas/Password'
+                role:
+                  $ref: '#/components/schemas/Role'
+      responses:
+        '201':
+          description: User created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/users/{id}/role:
+    patch:
+      tags: [Users]
+      summary: Change a user's role (S)
+      description: A superadmin cannot change their own role.
+      operationId: updateUserRole
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  $ref: '#/components/schemas/Role'
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/users/{id}/active:
+    patch:
+      tags: [Users]
+      summary: Activate or deactivate a user (A)
+      description: Admins cannot deactivate admins or superadmins, or themselves.
+      operationId: updateUserActive
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isActive]
+              properties:
+                isActive:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/users/{id}/reset-password:
+    post:
+      tags: [Users]
+      summary: Set a new password for a user (A)
+      description: 'Same hierarchy rule as `/active`: admins cannot reset another admin''s password.'
+      operationId: adminResetUserPassword
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newPassword]
+              properties:
+                newPassword:
+                  $ref: '#/components/schemas/Password'
+      responses:
+        '200':
+          $ref: '#/components/responses/MessageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/properties:
+    get:
+      tags: [Properties]
+      summary: Browse and filter properties (P)
+      description: |
+        Authentication is optional. Anonymous callers and clients only ever get `status=available`, whatever
+        they pass. Admins may pass any status.
+      operationId: listProperties
+      security:
+        - {}
+        - cookieAuth: []
+      parameters:
+        - name: q
+          in: query
+          description: Matches title, description or location.
+          schema:
+            type: string
+        - name: category
+          in: query
+          schema:
+            $ref: '#/components/schemas/PropertyCategory'
+        - name: listingType
+          in: query
+          schema:
+            $ref: '#/components/schemas/ListingType'
+        - name: location
+          in: query
+          schema:
+            type: string
+        - name: minPrice
+          in: query
+          schema:
+            type: number
+            minimum: 0
+        - name: maxPrice
+          in: query
+          schema:
+            type: number
+            minimum: 0
+        - name: status
+          in: query
+          description: Defaults to `available`. Ignored for non-admins.
+          schema:
+            $ref: '#/components/schemas/PropertyStatus'
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [newest, priceAsc, priceDesc]
+            default: newest
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of properties. Each item carries only its primary image; use the detail endpoint for all images.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Property'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      tags: [Properties]
+      summary: Create a property with images (A)
+      description: Multipart. Up to 8 images, 5 MB each, jpg/png/webp. The first image is the primary one unless changed later.
+      operationId: createProperty
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/PropertyInput'
+                - type: object
+                  properties:
+                    images:
+                      type: array
+                      maxItems: 8
+                      items:
+                        type: string
+                        format: binary
+      responses:
+        '201':
+          description: Property created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          description: An image exceeds 5 MB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/properties/{id}:
+    get:
+      tags: [Properties]
+      summary: One property with all images (P)
+      description: Non-available properties return 404 to non-admins.
+      operationId: getProperty
+      security:
+        - {}
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: The property.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Properties]
+      summary: Update a property (A)
+      description: JSON body. Any property field; only the fields sent are changed. Images are managed via the image endpoints.
+      operationId: updateProperty
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PropertyUpdate'
+      responses:
+        '200':
+          description: Updated property.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Properties]
+      summary: Delete a property (A)
+      description: Returns 409 if the property has bookings. Remove its images from storage as well.
+      operationId: deleteProperty
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/properties/{id}/images:
+    post:
+      tags: [Properties]
+      summary: Add images to a property (A)
+      description: The total number of images per property may not exceed 8 (400 otherwise).
+      operationId: addPropertyImages
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [images]
+              properties:
+                images:
+                  type: array
+                  minItems: 1
+                  maxItems: 8
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '201':
+          description: The images that were added.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PropertyImage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: An image exceeds 5 MB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/properties/{id}/images/{imageId}:
+    delete:
+      tags: [Properties]
+      summary: Delete an image (A)
+      description: Removes the file and the row. If the primary image is deleted, the oldest remaining image becomes primary.
+      operationId: deletePropertyImage
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/ImageIdPath'
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/properties/{id}/images/{imageId}/primary:
+    patch:
+      tags: [Properties]
+      summary: Set the primary image (A)
+      description: Exactly one image per property is primary; the previous primary is unset.
+      operationId: setPrimaryImage
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/ImageIdPath'
+      responses:
+        '200':
+          description: Updated image list for the property.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PropertyImage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/dashboard/stats:
+    get:
+      tags: [Dashboard]
+      summary: Dashboard figures (A)
+      operationId: getDashboardStats
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Aggregate counts for the admin dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/bookings/availability:
+    get:
+      tags: [Bookings]
+      summary: Slot grid for a date (P)
+      operationId: getBookingAvailability
+      parameters:
+        - name: propertyId
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      security: []
+      responses:
+        '200':
+          description: Every slot of the day with its availability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Availability'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/bookings:
+    get:
+      tags: [Bookings]
+      summary: List all bookings (A)
+      operationId: listBookings
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/BookingStatus'
+        - name: from
+          in: query
+          description: Viewing date on or after.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: Viewing date on or before.
+          schema:
+            type: string
+            format: date
+        - name: propertyId
+          in: query
+          schema:
+            type: integer
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of bookings.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Bookings]
+      summary: Book a site viewing (U)
+      description: Creates a `pending` booking for the caller, writes an audit log and a notification, and triggers the WhatsApp message to admins.
+      operationId: createBooking
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [propertyId, viewingDate, viewingTime]
+              properties:
+                propertyId:
+                  type: integer
+                viewingDate:
+                  type: string
+                  format: date
+                viewingTime:
+                  $ref: '#/components/schemas/TimeOfDay'
+                clientNotes:
+                  type: string
+      responses:
+        '201':
+          description: Booking created as `pending`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Slot already taken, or the caller already has an active booking for this property.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/bookings/mine:
+    get:
+      tags: [Bookings]
+      summary: The caller's bookings (U)
+      description: Newest first.
+      operationId: listMyBookings
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: All bookings of the caller (no pagination).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/bookings/{id}/cancel:
+    patch:
+      tags: [Bookings]
+      summary: Cancel a booking (U or A)
+      description: The owner may cancel their own active booking (`pending`, `confirmed`, `rescheduled`). An admin may cancel any active booking.
+      operationId: cancelBooking
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Cancelled booking.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+
+  /api/bookings/{id}/confirm:
+    patch:
+      tags: [Bookings]
+      summary: Confirm a booking (A)
+      operationId: confirmBooking
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNotesBody'
+      responses:
+        '200':
+          description: Confirmed booking.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+
+  /api/bookings/{id}/reschedule:
+    patch:
+      tags: [Bookings]
+      summary: Reschedule a booking (A)
+      description: Validates the new slot like a new booking (409 if taken). Sets status to `rescheduled`.
+      operationId: rescheduleBooking
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [viewingDate, viewingTime]
+              properties:
+                viewingDate:
+                  type: string
+                  format: date
+                viewingTime:
+                  $ref: '#/components/schemas/TimeOfDay'
+                adminNotes:
+                  type: string
+      responses:
+        '200':
+          description: Rescheduled booking.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+
+  /api/bookings/{id}/close:
+    patch:
+      tags: [Bookings]
+      summary: Close a booking as completed (A)
+      operationId: closeBooking
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNotesBody'
+      responses:
+        '200':
+          description: Booking with status `completed`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+
+  /api/valuations:
+    get:
+      tags: [Valuations]
+      summary: List all valuation requests (A)
+      operationId: listValuations
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ValuationStatus'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of valuation requests.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Valuation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Valuations]
+      summary: Submit a valuation request (U)
+      description: Creates a request with status `submitted`, writes an audit log and a notification, and triggers the WhatsApp message to admins.
+      operationId: createValuation
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [propertyCategory, location, purpose]
+              properties:
+                propertyCategory:
+                  $ref: '#/components/schemas/PropertyCategory'
+                location:
+                  type: string
+                  maxLength: 150
+                lrNumber:
+                  type: string
+                  maxLength: 50
+                approximateSize:
+                  type: string
+                  maxLength: 50
+                purpose:
+                  $ref: '#/components/schemas/ValuationPurpose'
+                additionalDetails:
+                  type: string
+      responses:
+        '201':
+          description: Request created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Valuation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/valuations/mine:
+    get:
+      tags: [Valuations]
+      summary: The caller's valuation requests (U)
+      description: Newest first.
+      operationId: listMyValuations
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: All requests of the caller (no pagination). `adminNotes` is included.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Valuation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/valuations/{id}/status:
+    patch:
+      tags: [Valuations]
+      summary: Move a valuation through the workflow (A)
+      description: Allowed moves are `submitted` -> `under_review` -> `completed`. Anything else returns 422. Sets `handledBy` to the caller.
+      operationId: updateValuationStatus
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  $ref: '#/components/schemas/ValuationStatus'
+                adminNotes:
+                  type: string
+      responses:
+        '200':
+          description: Updated request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Valuation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: Admin notifications (A)
+      operationId: listNotifications
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: unread
+          in: query
+          description: When `true`, only unread notifications.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Notifications, newest first, with the total unread count.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, unreadCount]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+                  unreadCount:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all notifications read (A)
+      operationId: markAllNotificationsRead
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/MessageOk'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark one notification read (A)
+      operationId: markNotificationRead
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Updated notification.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/audit-logs:
+    get:
+      tags: [Audit logs]
+      summary: View audit logs (A)
+      operationId: listAuditLogs
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: userId
+          in: query
+          schema:
+            type: integer
+        - name: action
+          in: query
+          description: Exact action name, for example `booking.confirm`.
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of audit logs, newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AuditLog'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/reports/bookings:
+    get:
+      tags: [Reports]
+      summary: Bookings report (A)
+      description: Branded with the Kiragu & Mwangi logo.
+      operationId: reportBookings
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportFormat'
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/BookingStatus'
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [dateAsc, dateDesc, statusAsc]
+            default: dateDesc
+      responses:
+        '200':
+          $ref: '#/components/responses/ReportFile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/reports/valuations:
+    get:
+      tags: [Reports]
+      summary: Valuations report (A)
+      operationId: reportValuations
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportFormat'
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ValuationStatus'
+      responses:
+        '200':
+          $ref: '#/components/responses/ReportFile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/reports/listings:
+    get:
+      tags: [Reports]
+      summary: Listings report (A)
+      operationId: reportListings
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportFormat'
+        - name: category
+          in: query
+          schema:
+            $ref: '#/components/schemas/PropertyCategory'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/PropertyStatus'
+      responses:
+        '200':
+          $ref: '#/components/responses/ReportFile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check (P)
+      operationId: health
+      security: []
+      responses:
+        '200':
+          description: The API is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+      description: HttpOnly session cookie set by login or register.
+
+  headers:
+    SetCookie:
+      description: Sets or clears the `session` cookie (HttpOnly, SameSite, Secure when on HTTPS).
+      schema:
+        type: string
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+    ImageIdPath:
+      name: imageId
+      in: path
+      required: true
+      schema:
+        type: integer
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    ReportFormat:
+      name: format
+      in: query
+      required: true
+      schema:
+        type: string
+        enum: [pdf, csv]
+
+  responses:
+    MessageOk:
+      description: Success with a human-readable message.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [message]
+            properties:
+              message:
+                type: string
+    ReportFile:
+      description: The generated report as a file download.
+      headers:
+        Content-Disposition:
+          description: 'attachment; filename="<report>-<date>.<pdf|csv>"'
+          schema:
+            type: string
+      content:
+        application/pdf:
+          schema:
+            type: string
+            format: binary
+        text/csv:
+          schema:
+            type: string
+            format: binary
+    BadRequest:
+      description: Validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Invalid request
+              details:
+                - field: email
+                  message: Must be a valid email
+    Unauthorized:
+      description: Not logged in, or the credentials are wrong.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Logged in but not allowed to do this.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Conflicts with existing data (duplicate email, taken slot, property has bookings).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unprocessable:
+      description: The action is not allowed from the current status.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: Rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Machine-readable, for example VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, INVALID_TRANSITION, RATE_LIMITED.
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+
+    PageMeta:
+      type: object
+      required: [page, limit, total]
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+          description: Total matching rows across all pages.
+
+    Password:
+      type: string
+      format: password
+      minLength: 8
+      maxLength: 72
+
+    Role:
+      type: string
+      enum: [client, admin, superadmin]
+
+    PropertyCategory:
+      type: string
+      enum: [residential, commercial, land]
+
+    ListingType:
+      type: string
+      enum: [sale, rent]
+
+    PropertyStatus:
+      type: string
+      enum: [available, under_offer, sold, rented, withdrawn]
+
+    BookingStatus:
+      type: string
+      enum: [pending, confirmed, rescheduled, completed, cancelled]
+
+    ValuationStatus:
+      type: string
+      enum: [submitted, under_review, completed]
+
+    ValuationPurpose:
+      type: string
+      enum: [sale, purchase, mortgage, insurance, investment, other]
+
+    TimeOfDay:
+      type: string
+      pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+      example: '10:00'
+
+    RegisterRequest:
+      type: object
+      required: [fullName, email, phoneNumber, password]
+      properties:
+        fullName:
+          type: string
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          maxLength: 150
+        phoneNumber:
+          type: string
+          maxLength: 20
+          description: Used for WhatsApp, include country code, for example +2547XXXXXXXX.
+        password:
+          $ref: '#/components/schemas/Password'
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    User:
+      type: object
+      required: [userId, fullName, email, phoneNumber, role, isActive, createdAt]
+      properties:
+        userId:
+          type: integer
+        fullName:
+          type: string
+        email:
+          type: string
+          format: email
+        phoneNumber:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    PropertyInput:
+      type: object
+      required: [title, category, listingType, location, price]
+      properties:
+        title:
+          type: string
+          maxLength: 150
+        description:
+          type: string
+        category:
+          $ref: '#/components/schemas/PropertyCategory'
+        listingType:
+          $ref: '#/components/schemas/ListingType'
+        location:
+          type: string
+          maxLength: 120
+        price:
+          type: number
+          minimum: 0
+          description: KES.
+        bedrooms:
+          type: integer
+          minimum: 0
+        bathrooms:
+          type: integer
+          minimum: 0
+        sizeSqft:
+          type: number
+          minimum: 0
+        status:
+          $ref: '#/components/schemas/PropertyStatus'
+
+    PropertyUpdate:
+      type: object
+      description: Same fields as PropertyInput, all optional.
+      properties:
+        title:
+          type: string
+          maxLength: 150
+        description:
+          type: string
+        category:
+          $ref: '#/components/schemas/PropertyCategory'
+        listingType:
+          $ref: '#/components/schemas/ListingType'
+        location:
+          type: string
+          maxLength: 120
+        price:
+          type: number
+          minimum: 0
+        bedrooms:
+          type: integer
+          minimum: 0
+        bathrooms:
+          type: integer
+          minimum: 0
+        sizeSqft:
+          type: number
+          minimum: 0
+        status:
+          $ref: '#/components/schemas/PropertyStatus'
+
+    PropertyImage:
+      type: object
+      required: [imageId, propertyId, imageUrl, isPrimary, uploadedAt]
+      properties:
+        imageId:
+          type: integer
+        propertyId:
+          type: integer
+        imageUrl:
+          type: string
+          description: Absolute URL, or a path served by the API.
+        isPrimary:
+          type: boolean
+        uploadedAt:
+          type: string
+          format: date-time
+
+    Property:
+      allOf:
+        - $ref: '#/components/schemas/PropertyInput'
+        - type: object
+          required: [propertyId, status, createdBy, createdAt, updatedAt]
+          properties:
+            propertyId:
+              type: integer
+            status:
+              $ref: '#/components/schemas/PropertyStatus'
+            createdBy:
+              type: integer
+              description: userId of the admin who created it.
+            primaryImageUrl:
+              type: string
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+
+    PropertyDetail:
+      allOf:
+        - $ref: '#/components/schemas/Property'
+        - type: object
+          required: [images]
+          properties:
+            images:
+              type: array
+              items:
+                $ref: '#/components/schemas/PropertyImage'
+
+    Availability:
+      type: object
+      required: [propertyId, date, slots]
+      properties:
+        propertyId:
+          type: integer
+        date:
+          type: string
+          format: date
+        slots:
+          type: array
+          description: Empty for Sundays and past dates.
+          items:
+            type: object
+            required: [time, available]
+            properties:
+              time:
+                $ref: '#/components/schemas/TimeOfDay'
+              available:
+                type: boolean
+
+    AdminNotesBody:
+      type: object
+      properties:
+        adminNotes:
+          type: string
+
+    Booking:
+      type: object
+      required: [bookingId, propertyId, userId, viewingDate, viewingTime, status, whatsappSent, createdAt, updatedAt]
+      properties:
+        bookingId:
+          type: integer
+        propertyId:
+          type: integer
+        userId:
+          type: integer
+        viewingDate:
+          type: string
+          format: date
+        viewingTime:
+          $ref: '#/components/schemas/TimeOfDay'
+        status:
+          $ref: '#/components/schemas/BookingStatus'
+        clientNotes:
+          type: string
+          nullable: true
+        adminNotes:
+          type: string
+          nullable: true
+        whatsappSent:
+          type: boolean
+        property:
+          type: object
+          description: Summary so lists do not need a second call.
+          properties:
+            propertyId:
+              type: integer
+            title:
+              type: string
+            location:
+              type: string
+        client:
+          type: object
+          description: Included for admins only.
+          properties:
+            userId:
+              type: integer
+            fullName:
+              type: string
+            phoneNumber:
+              type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Valuation:
+      type: object
+      required: [valuationId, userId, propertyCategory, location, purpose, status, createdAt, updatedAt]
+      properties:
+        valuationId:
+          type: integer
+        userId:
+          type: integer
+        propertyCategory:
+          $ref: '#/components/schemas/PropertyCategory'
+        location:
+          type: string
+        lrNumber:
+          type: string
+          nullable: true
+        approximateSize:
+          type: string
+          nullable: true
+        purpose:
+          $ref: '#/components/schemas/ValuationPurpose'
+        additionalDetails:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/ValuationStatus'
+        adminNotes:
+          type: string
+          nullable: true
+        handledBy:
+          type: integer
+          nullable: true
+        client:
+          type: object
+          description: Included for admins only.
+          properties:
+            userId:
+              type: integer
+            fullName:
+              type: string
+            phoneNumber:
+              type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Notification:
+      type: object
+      required: [notificationId, type, message, isRead, createdAt]
+      properties:
+        notificationId:
+          type: integer
+        type:
+          type: string
+          enum: [booking_created, valuation_submitted]
+        message:
+          type: string
+        entityName:
+          type: string
+          enum: [viewing_bookings, valuation_requests]
+        entityId:
+          type: integer
+        isRead:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    AuditLog:
+      type: object
+      required: [logId, action, createdAt]
+      properties:
+        logId:
+          type: integer
+        userId:
+          type: integer
+          nullable: true
+          description: Null for actions by anonymous users, for example a failed login.
+        action:
+          type: string
+          example: booking.confirm
+        entityName:
+          type: string
+          nullable: true
+        entityId:
+          type: integer
+          nullable: true
+        details:
+          type: string
+          nullable: true
+        ipAddress:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    DashboardStats:
+      type: object
+      required: [properties, bookings, valuations, users, unreadNotifications]
+      properties:
+        properties:
+          type: object
+          required: [total, available, sold, rented]
+          properties:
+            total:
+              type: integer
+            available:
+              type: integer
+            sold:
+              type: integer
+            rented:
+              type: integer
+        bookings:
+          type: object
+          required: [total, pending, confirmed, upcoming]
+          properties:
+            total:
+              type: integer
+            pending:
+              type: integer
+            confirmed:
+              type: integer
+            upcoming:
+              type: integer
+              description: Active bookings dated today or later.
+        valuations:
+          type: object
+          required: [total, submitted, underReview, completed]
+          properties:
+            total:
+              type: integer
+            submitted:
+              type: integer
+            underReview:
+              type: integer
+            completed:
+              type: integer
+        users:
+          type: object
+          required: [total, clients]
+          properties:
+            total:
+              type: integer
+            clients:
+              type: integer
+        unreadNotifications:
+          type: integer

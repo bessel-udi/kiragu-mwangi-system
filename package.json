@@ -1,0 +1,35 @@
+{
+  "name": "kiragu-mwangi-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kiragu & Mwangi Real Estate Management System: API, public site, admin panel and shared UI kit.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "api",
+    "web",
+    "admin",
+    "ui-kit"
+  ],
+  "scripts": {
+    "mock": "prism mock api/openapi.yaml --port 4010",
+    "lint:contract": "redocly lint api/openapi.yaml",
+    "lint": "eslint .",
+    "format": "prettier --write . \"!api/openapi.yaml\" \"!package-lock.json\"",
+    "format:check": "prettier --check . \"!api/openapi.yaml\" \"!package-lock.json\"",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@redocly/cli": "^1.27.0",
+    "@stoplight/prism-cli": "^5.12.0",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react": "^7.37.3",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2"
+  }
+}
