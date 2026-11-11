@@ -1,0 +1,6 @@
+// ui-kit/src/styles/index.scss
+// Stylesheet entry point of the ui-kit: overrides first, then Bootstrap, then global rules.
+// Exposed to the apps as "ui-kit/styles".
+@import '../theme/bootstrap-overrides';
+@import 'bootstrap/scss/bootstrap';
+@import 'global';

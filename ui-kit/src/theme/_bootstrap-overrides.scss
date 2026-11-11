@@ -1,0 +1,47 @@
+// ui-kit/src/theme/_bootstrap-overrides.scss
+// Bootstrap 5.3 Sass variable overrides built from the design tokens.
+// This file must be imported BEFORE bootstrap so its values win over Bootstrap's defaults.
+@import 'tokens';
+
+// Theme colours
+$primary: $km-navy;
+$secondary: $km-slate;
+$success: $km-success;
+$info: $km-info;
+$warning: $km-warning;
+$danger: $km-danger;
+$light: $km-ivory;
+$dark: $km-ink;
+
+// Page and text
+$body-bg: $km-ivory;
+$body-color: $km-ink;
+$font-family-sans-serif: $km-font-body;
+$headings-font-family: $km-font-heading;
+$headings-font-weight: 700;
+$headings-color: $km-navy;
+
+// Links
+$link-color: $km-navy;
+$link-hover-color: #0c1a2c;
+
+// Shape
+$border-radius: $km-radius;
+$border-radius-sm: 0.375rem;
+$border-radius-lg: 0.75rem;
+$border-radius-xl: 1rem;
+
+// Depth
+$box-shadow-sm: $km-shadow-sm;
+$box-shadow: $km-shadow;
+$box-shadow-lg: $km-shadow-lg;
+
+// Forms, buttons and focus states
+$input-focus-border-color: $km-navy;
+$input-btn-focus-color: rgba($km-navy, 0.25);
+$focus-ring-color: rgba($km-navy, 0.35);
+$form-label-font-weight: 500;
+$btn-font-weight: 600;
+
+// Cards
+$card-border-color: rgba($km-navy, 0.1);
