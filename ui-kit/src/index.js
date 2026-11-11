@@ -20,6 +20,8 @@ export { default as LoadingSpinner } from './components/LoadingSpinner.jsx';
 export { default as Skeleton } from './components/Skeleton.jsx';
 export { default as EmptyState } from './components/EmptyState.jsx';
 export { default as ErrorState } from './components/ErrorState.jsx';
+export { default as Pagination } from './components/Pagination.jsx';
+export { default as DataTable } from './components/DataTable.jsx';
 
 export {
   formatMoney,

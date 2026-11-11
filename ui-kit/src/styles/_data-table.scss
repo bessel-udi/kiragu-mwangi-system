@@ -1,0 +1,72 @@
+// ui-kit/src/styles/_data-table.scss
+// Styles for the DataTable component: compact table on tablets and up,
+// stacked labelled cards on phones (each cell shows its column header via data-label).
+
+.km-table-wrap {
+  overflow-x: auto;
+}
+
+.km-data-table {
+  --bs-table-bg: #fff;
+
+  th {
+    color: var(--km-slate);
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .km-data-table {
+    border-collapse: separate;
+
+    // Hide the header row visually but keep it for screen readers
+    thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+
+    tbody,
+    tr,
+    td {
+      display: block;
+      width: 100%;
+    }
+
+    tr {
+      margin-bottom: 1rem;
+      border: 1px solid rgba(18, 38, 63, 0.1);
+      border-radius: var(--km-radius);
+      background: #fff;
+      box-shadow: var(--km-shadow-sm);
+      overflow: hidden;
+    }
+
+    td {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      text-align: right;
+      border-bottom: 1px solid rgba(18, 38, 63, 0.06);
+
+      &:last-child {
+        border-bottom: 0;
+      }
+
+      &::before {
+        content: attr(data-label);
+        flex: 0 0 40%;
+        color: var(--km-slate);
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-align: left;
+      }
+    }
+  }
+}
