@@ -1,0 +1,39 @@
+// ui-kit/src/theme/_tokens.scss
+// Design tokens for the "Heritage Navy & Brass" theme (guide Section 1.6).
+// Single source of truth for colour, type, shape and depth. The Bootstrap
+// overrides and the global stylesheet both read from here.
+
+// Palette
+$km-navy: #12263f; // primary
+$km-brass: #c8a24a; // accent / CTA highlights (use as a fill, not as text on light backgrounds)
+$km-ivory: #f7f5f0; // page background
+$km-ink: #1f2933; // body text
+$km-success: #2e7d5b;
+$km-warning: #b7791f;
+$km-danger: #b42318;
+$km-info: #2563a8;
+$km-slate: #64748b; // muted
+
+// Typefaces: Playfair Display for headings, Inter for body, forms and tables
+$km-font-heading: 'Playfair Display', Georgia, 'Times New Roman', serif;
+$km-font-body:
+  'Inter',
+  system-ui,
+  -apple-system,
+  'Segoe UI',
+  Roboto,
+  'Helvetica Neue',
+  Arial,
+  sans-serif;
+
+// Shape: 8px corner radius
+$km-radius: 0.5rem;
+
+// Depth: soft, low shadows
+$km-shadow-sm:
+  0 1px 2px rgba(18, 38, 63, 0.06),
+  0 1px 3px rgba(18, 38, 63, 0.08);
+$km-shadow:
+  0 2px 6px rgba(18, 38, 63, 0.08),
+  0 4px 12px rgba(18, 38, 63, 0.06);
+$km-shadow-lg: 0 8px 24px rgba(18, 38, 63, 0.12);

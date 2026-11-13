@@ -1,0 +1,86 @@
+// ui-kit/src/styles/_global.scss
+// Global rules on top of Bootstrap: CSS custom properties, focus states and the
+// brass accent helpers. Brass (#C8A24A) is for fills and borders; do not use it
+// as text colour on light backgrounds (contrast is too low for WCAG AA).
+@import '../theme/tokens';
+
+// CSS custom properties so components and apps can read the tokens at runtime
+:root {
+  --km-navy: #{$km-navy};
+  --km-brass: #{$km-brass};
+  --km-ivory: #{$km-ivory};
+  --km-ink: #{$km-ink};
+  --km-slate: #{$km-slate};
+  --km-radius: #{$km-radius};
+  --km-shadow-sm: #{$km-shadow-sm};
+  --km-shadow: #{$km-shadow};
+  --km-shadow-lg: #{$km-shadow-lg};
+  --km-font-heading: #{$km-font-heading};
+  --km-font-body: #{$km-font-body};
+  // Focus ring colour; the admin sidebar overrides it with brass on navy
+  --km-focus-color: #{$km-navy};
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+// Visible keyboard focus everywhere (WCAG)
+:focus-visible,
+.btn:focus-visible,
+.form-control:focus,
+.form-select:focus,
+.form-check-input:focus,
+.page-link:focus {
+  outline: 3px solid var(--km-focus-color);
+  outline-offset: 2px;
+}
+
+// Soft, low shadow on cards
+.card {
+  box-shadow: var(--km-shadow-sm);
+}
+
+// Price badge shown on listing cards
+.km-price-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--km-radius);
+  background-color: var(--km-brass);
+  color: var(--km-navy);
+  font-weight: 700;
+}
+
+// Brass accent helpers
+.bg-brass {
+  background-color: var(--km-brass) !important;
+}
+
+.border-brass {
+  border-color: var(--km-brass) !important;
+}
+
+// Brass call-to-action button (navy text keeps AA contrast)
+.btn-brass {
+  --bs-btn-color: #12263f;
+  --bs-btn-bg: #c8a24a;
+  --bs-btn-border-color: #c8a24a;
+  --bs-btn-hover-color: #12263f;
+  --bs-btn-hover-bg: #b8923c;
+  --bs-btn-hover-border-color: #b8923c;
+  --bs-btn-active-color: #12263f;
+  --bs-btn-active-bg: #a8842f;
+  --bs-btn-active-border-color: #a8842f;
+  --bs-btn-disabled-color: #12263f;
+  --bs-btn-disabled-bg: #c8a24a;
+  --bs-btn-disabled-border-color: #c8a24a;
+}
+
+// Respect users who ask for less motion
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
